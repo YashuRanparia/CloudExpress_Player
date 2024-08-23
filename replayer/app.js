@@ -4,13 +4,9 @@ const PORT = 3001
 
 const playerContainer = document.getElementById('player-container');
 playerContainer.style.margin = '0 auto';
-// playerContainer.style.position = 'absolute';
 playerContainer.style.alignContent = "center"
 playerContainer.style.textAlign = "center"
 
-const instructionText = document.getElementById('instruction-text');
-const intervalInput = document.getElementById('interval-input');
-const errorMessage = document.getElementById('error-message');
 const submitButton = document.getElementById('submit-button');
 
 let maxInterval;
@@ -25,79 +21,20 @@ async function fetchReplayData(interval) {
   return data;
 }
 
-// Fetch max interval value from the backend
-async function fetchMaxInterval() {
-  try {
-    const response = await fetch(`${serverURL}/api/max-interval`);
-    const data = await response.json();
-    maxInterval = data.maxInterval;
-    console.log('Max Interval:', maxInterval);
-  } catch (error) {
-    console.error('Error fetching session ID:', error);
-  }
-}
-
-
-//For showing the record_data
-async function fetchFolderList() {
-  const response = await fetch(`${serverURL}/api/record-data-folders`);
+async function fetchLastRecord() {
+  const response = await fetch(`${serverURL}/api/last-recor-replay`);
   const data = await response.json();
-
-  const folderList = document.getElementById('folderList');
-  folderList.style.width = "auto"
-  while (folderList.hasChildNodes()) {
-    folderList.removeChild('li');
-  }
-
-  data.forEach(folder => {
-    const listItem = document.createElement('li');
-    listItem.textContent = folder;
-    listItem.style.cursor = "pointer"
-    listItem.style.width = "auto"
-    folderList.appendChild(listItem);
-
-    listItem.addEventListener('click', () => {
-      const confirmed = confirm(`Are you sure you want to delete ${folder}?`);
-      if (confirmed) {
-        deleteFolder(folder);
-      }
-    });
-
-    folderList.appendChild(listItem);
-  });
+  return data;
 }
 
-//Function to delete the folder
-async function deleteFolder(folderName) {
-  try {
-    const response = await fetch(`${serverURL}/api/delete-folder/${folderName}`, {
-      method: 'DELETE'
-    });
-
-    if (response.ok) {
-      // Update the UI to reflect the deleted folder
-      fetchFolderList();
-    } else {
-      console.error('Error deleting folder:', response.statusText);
-    }
-  } catch (error) {
-    console.error('Error deleting folder:', error);
-  }
-}
-
-//Button for fetching the events data to play
 submitButton.addEventListener('click', async () => {
-  const userInput = parseInt(intervalInput.value);
+  // const userInput = parseInt(intervalInput.value);
 
-  if ((userInput < 1) || (userInput > maxInterval)) {
-    errorMessage.textContent = `Incorrect value. Please enter a value between 1 and ${maxInterval}.`;
-    return;
-  } else {
-    errorMessage.textContent = ''; // Clear any previous error messages
-
-    fetchReplayData(userInput)
+  fetchLastRecord()
       .then(data => {
         console.log(data); // Process the fetched data
+
+        // const activeEvents = data.filter(event => isEventActive(event));
 
         const filteredData = data.filter(event => event && event.type && event.timestamp); // Filter out invalid events
         console.log('Filtered data:', filteredData); // Log the filtered data
@@ -114,10 +51,58 @@ submitButton.addEventListener('click', async () => {
             events.push(element);
           });
 
+          let eventsWithTimeDiffs = events
+
           player = new rrwebPlayer({
             target: document.getElementById('player-container'),
             props: {
-              events
+              events: eventsWithTimeDiffs,
+              // jumpToTimestamp(targetTimestamp) {
+              //   // Find the closest active event (if any) before the target timestamp
+              //   const activeEventIndex = events.findIndex(event => event.isActive && event.timestamp <= targetTimestamp);
+            
+              //   if (activeEventIndex === -1) {
+              //     console.warn('Target timestamp not found in data, or no active events before it.');
+              //     return;
+              //   }
+            
+              //   // Calculate the accumulated time difference up to the active event
+              //   const accumulatedTimeDiff = events.slice(0, activeEventIndex + 1).reduce((acc, event) => acc + event.timestampDiff, 0);
+            
+              //   // Seek the player to the accumulated time
+              //   player.goto(accumulatedTimeDiff, true);
+              // }
+
+              jumpToTimestamp(targetTimestamp) {
+                // Find the closest active event (if any) before the target timestamp
+                const activeEventIndex = eventsWithTimeDiffs.findIndex(event => event.isActive && event.timestamp <= targetTimestamp);
+            
+                if (activeEventIndex === -1) {
+                  console.warn('Target timestamp not found in data, or no active events before it.');
+                  return;
+                }
+            
+                // Calculate the accumulated time difference up to the active event
+                const accumulatedTimeDiff = activeEvents.slice(0, activeEventIndex + 1).reduce((acc, event) => acc + event.timestampDiff, 0);
+            
+                // Find the index of the last active event
+                const lastActiveEventIndex = eventsWithTimeDiffs.slice(activeEventIndex).findIndex(event => !event.isActive) + activeEventIndex;
+            
+                // Calculate the end time offset for the active range
+                const endTimeOffset = lastActiveEventIndex !== -1 ? eventsWithTimeDiffs[lastActiveEventIndex].timestamp : eventsWithTimeDiffs[eventsWithTimeDiffs.length - 1].timestamp;
+            
+                // Check if the time difference between the start and end offsets is greater than 5 seconds
+                const timeDiff = endTimeOffset - accumulatedTimeDiff;
+                if (timeDiff > 5000) { // Convert 5 seconds to milliseconds
+                  // Skip inactive events and calculate new accumulated time
+                  const filteredEvents = eventsWithTimeDiffs.slice(activeEventIndex, lastActiveEventIndex).filter(event => event.isActive);
+                  const newAccumulatedTimeDiff = filteredEvents.reduce((acc, event) => acc + event.timestampDiff, accumulatedTimeDiff);
+                  accumulatedTimeDiff = newAccumulatedTimeDiff;
+                }
+            
+                // Use playRange to play only the active events
+                player.playRange(accumulatedTimeDiff, endTimeOffset, true);
+              }
             },
           });
           player.play();
@@ -126,39 +111,5 @@ submitButton.addEventListener('click', async () => {
       .catch(error => {
         console.error('Error fetching replay data:', error);
       });
-  }
 
 });
-
-const update_btn = document.getElementById('update-counter')
-update_btn.textContent = "Update Counter"
-
-update_btn.addEventListener('click', ()=>{
-  const counterValue = prompt("Enter the value of the counter:");
-  console.log("Entered counter value:", counterValue);
-
-  const body = JSON.stringify({counterValue})
-
-  fetch(`${serverURL}/update-counter`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: body,
-  })
-  .then(response => {
-    console.log('Counter Updated successfully');
-  })
-  .catch(error => {
-    console.error('Error updating counter:', error);
-  });
-});
-
-
-
-// Initialize the page
-(async () => {
-  await fetchMaxInterval();
-  instructionText.textContent = `Enter the interval number to play: `;
-  fetchFolderList();
-})();
